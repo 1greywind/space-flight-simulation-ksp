@@ -1,0 +1,10 @@
+CLEARSCREEN.
+
+DECLARE PARAMETER TIME_WARP IS 0.
+
+IF TIME_WARP > 0 {
+	PRINT "WARP START".
+	kuniverse:timewarp:warpto(time:seconds + TIME_WARP).
+	WAIT TIME_WARP.
+	PRINT "WARP END".
+}.

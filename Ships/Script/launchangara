@@ -1,0 +1,279 @@
+CLEARSCREEN.
+
+SET TARGET_PE TO 200000.
+SET TARGET_APO TO 450000.
+SET NEEDED_APO TO 500000.
+SET TARGET_PITCH TO 90.
+SET TARGET_HEADING TO 90.
+SET OLD_VSPEED TO 0.
+SET PITCH_ANGLE TO 20.
+
+LOCK THROTTLE TO 1.0.
+
+function orbit_normal {
+    parameter orbit_in.
+    
+    return VCRS(orbit_in:body:position - orbit_in:position,
+                orbit_in:velocity:orbit):normalized.
+}
+
+function swapYZ {
+    parameter vec_in.
+
+    return V(vec_in:X, vec_in:Z, vec_in:Y).
+}
+
+function swapped_orbit_normal {
+    parameter orbit_in.
+
+    return -swapYZ(orbit_normal(orbit_in)).
+}
+
+function relativeInc {
+    parameter orbiter_a, orbiter_b.
+
+    return abs(vang(swapped_orbit_normal(orbiter_a), swapped_orbit_normal(orbiter_b))).
+}
+
+function compass_for_vec {
+
+  parameter input_vessel.
+
+  parameter input_vector.
+
+  set east_unit_vec to  vcrs(input_vessel:up:vector, input_vessel:north:vector).
+
+  set east_vel to vdot(input_vector, east_unit_vec). 
+
+  set north_vel to vdot(input_vector, input_vessel:north:vector).
+
+  set compass to arctan2(east_vel, north_vel).
+
+  if compass < 0 {
+    set compass to compass + 360.
+  }
+
+  return compass.
+}
+
+set target to "Federation + Soyuz 5".
+
+set relinc to relativeInc(ship,target).
+
+print round(compass_for_vec(ship, ship:velocity:obt), 1).
+
+PRINT "Awaiting relative inclination with Federation vessel to be 11.65 degrees".
+
+SET WARP TO 3.
+
+until relinc < 1.2 {
+    PRINT "Relative inclination: " + relinc AT (0,23).
+    set relinc to relativeInc(ship,target).
+    
+    IF relinc < 1.5 {
+        SET WARP TO 0.
+    }.
+}
+
+PRINT "Counting down:".
+FROM {local countdown is 5.} UNTIL countdown = 0 STEP {SET countdown to countdown - 1.} DO {
+    PRINT "..." + countdown.
+    WAIT 1. // pauses the script here for 1 second.
+}
+
+PRINT "Engine startup".
+
+SET MYSTEER TO HEADING(TARGET_HEADING,TARGET_PITCH).
+
+LOCK STEERING TO MYSTEER.
+
+STAGE.
+
+PRINT "Wait for maximum thrust".
+
+WAIT 4.
+
+PRINT "Lift Off".
+
+STAGE.
+
+DECLARE STG TO 1.
+DECLARE FAIRINGS_DECOUPLE TO 0.
+DECLARE CUT_THROTTLE_MAINENGINE TO 0.
+DECLARE PITCH_20 TO 0.
+DECLARE SAS_ON TO 0.
+DECLARE PITCH_MINUS TO 0.
+
+SET mainEngine TO SHIP:PARTSDUBBED("RD191.MAINENGINE")[0]. 
+SET sideEngine TO SHIP:PARTSDUBBED("RD191.SIDEENGINE")[0]. 
+
+UNTIL SHIP:PERIAPSIS > TARGET_PE {
+    IF sideEngine:GETMODULE("ModuleEnginesRF"):GETFIELD("тяга") = 0 {
+        IF STG = 1 {
+            PRINT "First Stage Separation. Main Engine Throttle set to 100%".
+            
+            mainEngine:GETMODULE("ModuleEnginesRF"):SETFIELD("ограничение тяги",100).
+            
+            WAIT 1.
+            
+            STAGE.
+            
+            SET STG TO 2.
+            
+            SET SAS_ON TO 1.
+            
+            SAS ON.
+            
+            WAIT 1.
+            
+            set sasmode to "prograde".
+            
+            unlock steering.
+        }.
+    }.
+    
+    IF MAXTHRUST = 0 {
+        IF STG = 2 {
+            PRINT "Second Stage Separation. Third Stage Engines startup".
+            
+            WAIT 1.
+        
+            STAGE.
+                        
+            SET STG TO 3.
+        }
+    }.
+    
+    IF VERTICALSPEED > 100 AND CUT_THROTTLE_MAINENGINE = 0 {
+        PRINT "Cutting throttle on main engine".
+    
+        mainEngine:GETMODULE("ModuleEnginesRF"):SETFIELD("ограничение тяги",10).
+        
+        SET CUT_THROTTLE_MAINENGINE TO 1.
+    }.
+    
+    IF ALT:RADAR > 100000 AND FAIRINGS_DECOUPLE = 0 {
+        PRINT "Fairings decouple".
+        
+        WAIT 1.
+        
+        STAGE.
+        
+        SET FAIRINGS_DECOUPLE TO 1.
+    }.
+        
+    IF SHIP:APOAPSIS < TARGET_APO AND PITCH_20 = 0 AND SAS_ON = 0{
+        set TARGET_PITCH to max( 5, 90 * (1 - max(0, LN(ALT:RADAR / 1000) ) / 6.3 ) ).
+        SET TARGET_HEADING TO 90.
+        
+        SET MYSTEER TO HEADING(TARGET_HEADING,TARGET_PITCH).
+        
+        PRINT "Pitching to " + ROUND(TARGET_PITCH,0) + " degrees                 " AT(0,25).
+    }
+    
+    IF SAS_ON = 1 AND PITCH_20 = 0 {
+        PRINT "Pitching to SAS prograde                          " AT (0,25).
+    }
+    
+    IF VERTICALSPEED < 300 AND PITCH_20 = 0 AND STG = 3 {
+        SET PITCH_20 TO 1.
+        SAS OFF.
+        LOCK STEERING TO MYSTEER.
+    }.   
+    
+    IF PITCH_20 = 1 AND PITCH_MINUS = 0 {
+        IF VERTICALSPEED < OLD_VSPEED {
+            SET PITCH_ANGLE TO PITCH_ANGLE + 1.
+            
+            set TARGET_PITCH to PITCH_ANGLE.
+            
+            SET CURRENT_PITCH_ANGLE TO ROUND(90 - vectorangle(UP:FOREVECTOR, FACING:FOREVECTOR)).
+            
+            UNTIL CURRENT_PITCH_ANGLE = PITCH_ANGLE {
+                SET CURRENT_PITCH_ANGLE TO ROUND(90 - vectorangle(UP:FOREVECTOR, FACING:FOREVECTOR)).
+                PRINT "Current pitch angle " + CURRENT_PITCH_ANGLE + " degrees" AT (0,24).
+                PRINT "Pitching to " + TARGET_PITCH + " degrees" AT(0,25).
+                SET MYSTEER TO HEADING(round(compass_for_vec(ship, ship:velocity:obt), 1),TARGET_PITCH).       
+            
+                IF SHIP:PERIAPSIS > TARGET_PE {
+                    BREAK.
+                }
+                
+                IF SHIP:APOAPSIS > 420000 {
+                    BREAK.
+                }                
+            }.
+        }
+        
+        IF VERTICALSPEED > OLD_VSPEED {
+            SET PITCH_ANGLE TO PITCH_ANGLE - 2.
+            
+            set TARGET_PITCH to PITCH_ANGLE.
+            
+            SET CURRENT_PITCH_ANGLE TO ROUND(90 - vectorangle(UP:FOREVECTOR, FACING:FOREVECTOR)).
+            
+            UNTIL CURRENT_PITCH_ANGLE = PITCH_ANGLE {
+                SET CURRENT_PITCH_ANGLE TO ROUND(90 - vectorangle(UP:FOREVECTOR, FACING:FOREVECTOR)).
+                PRINT "Current pitch angle " + CURRENT_PITCH_ANGLE + " degrees" AT (0,24).
+                PRINT "Pitching to " + TARGET_PITCH + " degrees" AT(0,25).
+                SET MYSTEER TO HEADING(round(compass_for_vec(ship, ship:velocity:obt), 1),TARGET_PITCH).       
+
+                IF SHIP:PERIAPSIS > TARGET_PE {
+                    BREAK.
+                }
+                
+                IF SHIP:APOAPSIS > 420000 {
+                    BREAK.
+                }
+            }.
+        }
+        
+        IF PITCH_ANGLE > 30 {
+            SET PITCH_ANGLE TO 30.
+            
+            set TARGET_PITCH to PITCH_ANGLE.
+            
+            SET MYSTEER TO HEADING(round(compass_for_vec(ship, ship:velocity:obt), 1),TARGET_PITCH). 
+        }
+        
+        SET OLD_VSPEED TO VERTICALSPEED.
+        
+        IF SHIP:APOAPSIS > 420000 {
+            SET PITCH_MINUS TO 1.
+        }
+    }.
+    
+    IF PITCH_MINUS = 1 {
+        SET MYSTEER TO HEADING(round(compass_for_vec(ship, ship:velocity:obt), 1),-20). 
+    }.
+    
+    PRINT "Periapsis " + ROUND(SHIP:PERIAPSIS,0) AT (0,26).
+    
+}.
+
+LOCK THROTTLE TO 0.
+
+SET SHIP:CONTROL:PILOTMAINTHROTTLE TO 0.
+
+PRINT "Third Stage Separation".
+
+WAIT 1.
+
+STAGE.
+
+SAS ON.
+
+WAIT 1.
+
+RCS ON.
+
+WAIT 1.
+
+set sasmode to "prograde".
+
+WAIT 120.
+
+RCS OFF.
+
+PRINT "Orbit reached. Launch complete".
+ 

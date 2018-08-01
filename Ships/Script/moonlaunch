@@ -1,0 +1,110 @@
+CLEARSCREEN.
+
+SAS OFF.
+
+SET TARGET_PE TO 30000.
+SET TARGET_APO TO 150000.
+SET TARGET_PITCH TO 45.
+SET TARGET_HEADING TO 16.0.
+
+LOCK THROTTLE TO 1.0.
+
+DECLARE PITCH_MINUS TO 0.
+DECLARE SAS_ON TO 0.
+DECLARE ORBIT_REACHED TO 0.
+DECLARE VECTOR TO SHIP:VELOCITY:SURFACE.
+
+function compass_for_vec {
+
+  parameter input_vessel.
+
+  parameter input_vector.
+
+  set east_unit_vec to  vcrs(input_vessel:up:vector, input_vessel:north:vector).
+
+  set east_vel to vdot(input_vector, east_unit_vec). 
+
+  set north_vel to vdot(input_vector, input_vessel:north:vector).
+
+  set compass to arctan2(east_vel, north_vel).
+
+  if compass < 0 {
+    set compass to compass + 360.
+  }
+
+  return compass.
+}
+
+PRINT "Counting down:".
+FROM {local countdown is 5.} UNTIL countdown = 0 STEP {SET countdown to countdown - 1.} DO {
+    PRINT "..." + countdown.
+    WAIT 1. // pauses the script here for 1 second.
+}
+
+RCS ON.
+
+PRINT "Engine startup and Lift off".
+
+SET MYSTEER TO HEADING(TARGET_HEADING,TARGET_PITCH).
+
+LOCK STEERING TO MYSTEER.
+
+STAGE.
+
+UNTIL ORBIT_REACHED = 1 {           
+    IF SHIP:PERIAPSIS > TARGET_PE OR SHIP:APOAPSIS > TARGET_APO {
+        SET ORBIT_REACHED TO 1.
+    }
+
+    IF SHIP:PERIAPSIS < TARGET_PE  AND PITCH_MINUS = 0 AND SAS_ON = 0 {
+        //set TARGET_PITCH to max( 5, 90 * (1 - max(0, LN(ALT:RADAR / 1000) ) / 4.0 ) ).
+        
+        SET TARGET_HEADING TO 16.0.
+    }
+    
+    IF SHIP:APOAPSIS > 10000 AND SAS_ON = 0 AND PITCH_MINUS = 0 {
+        SET SAS_ON TO 1.        
+        
+        UNLOCK STEERING.
+        
+        SAS ON.
+        
+        WAIT 1.
+        
+        set sasmode to "prograde".
+    }
+        
+    SET CURRENT_PITCH_ANGLE TO ROUND(90 - vectorangle(UP:FOREVECTOR, FACING:FOREVECTOR)).
+    //PRINT "Current pitch angle " + CURRENT_PITCH_ANGLE + " degrees" AT (0,24).
+
+        
+    IF CURRENT_PITCH_ANGLE < 5 AND PITCH_MINUS = 0 {
+        SET PITCH_MINUS TO 1.
+        SAS OFF.
+    }
+    
+    IF PITCH_MINUS = 1 {
+        LOCK STEERING TO MYSTEER.
+        SET TARGET_PITCH TO 0.
+        
+        SET VECTOR TO SHIP:VELOCITY:OBT.
+        SET TARGET_HEADING TO (round(compass_for_vec(ship, VECTOR), 1) + 20).
+    }
+    
+    SET MYSTEER TO HEADING(TARGET_HEADING,TARGET_PITCH).
+        
+    PRINT "Pitching to " + ROUND(TARGET_PITCH,0) + " degrees                 " AT(0,25).
+    PRINT "Periapsis " + ROUND(SHIP:PERIAPSIS,0) AT (0,26).
+    PRINT "Apoapsis " + ROUND(SHIP:APOAPSIS,0) AT (0,27).
+    PRINT "Current heading " + ROUND((SHIP:BEARING*-1),0) + "                    " AT (0,28).
+    
+}.
+
+LOCK THROTTLE TO 0.
+
+SET SHIP:CONTROL:PILOTMAINTHROTTLE TO 0.
+
+UNLOCK STEERING.
+
+PRINT "Orbit reached. Launch complete".
+ 
